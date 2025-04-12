@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from "uuid";
 
 function App() {
   const [questions, setQuestions] = useState([]);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
   const [selectedOptions, setSelectedOptions] = useState([]);
   const [examSessionId, setExamSessionId] = useState(null);
   const [showResults, setShowResults] = useState(false);
@@ -55,15 +54,25 @@ function App() {
     fetchAnswerDetails();
   }, [showResults]);
 
-  const handleOptionSelect = (index, isMultipleChoice) => {
-    if (isMultipleChoice) {
-      setSelectedOptions((prev) =>
-        prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
-      );
-    } else {
-      setSelectedOptions([index]);
-    }
+  const handleOptionSelect = (questionIndex, optionIndex, isMultipleChoice) => {
+    setSelectedOptions((prev) => {
+      const updated = [...prev];
+      const current = updated[questionIndex] || [];
+  
+      if (isMultipleChoice) {
+        if (current.includes(optionIndex)) {
+          updated[questionIndex] = current.filter((i) => i !== optionIndex);
+        } else {
+          updated[questionIndex] = [...current, optionIndex];
+        }
+      } else {
+        updated[questionIndex] = [optionIndex];
+      }
+  
+      return updated;
+    });
   };
+  
 
   const formatTime = (seconds) => {
     const hrs = String(Math.floor(seconds / 3600)).padStart(2, "0");
@@ -72,31 +81,31 @@ function App() {
     return `${hrs}:${mins}:${secs}`;
   };
 
-  const checkAnswer = async () => {
-    const startIndex = currentPage * questionsPerPage;
-    const currentQ = questions[startIndex + currentQuestion];
-    const correctAnswers = currentQ.correct_answers || [];
-
-    const isCorrect =
-      correctAnswers.length === selectedOptions.length &&
-      correctAnswers.every((val) => selectedOptions.includes(val));
-
-    if (isCorrect) setScore((prev) => prev + 1);
-
-    await submitAnswer(currentQ.id, selectedOptions, isCorrect, examSessionId);
-
-    const nextQuestion = currentQuestion + 1;
-
-    if (nextQuestion < questions.length) {
-      setCurrentQuestion(nextQuestion);
-      setSelectedOptions([]);
-    } else {
-      const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-      await saveExamResult(examSessionId, score, questions.length, totalTime);
-      setEndTime(Date.now());
-      setShowResults(true);
+  const handleSubmitExam = async () => {
+    let correctCount = 0;
+  
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      const userSelected = selectedOptions[i] || [];
+      const correctAnswers = q.correct_answers || [];
+  
+      const isCorrect =
+        correctAnswers.length === userSelected.length &&
+        correctAnswers.every((val) => userSelected.includes(val));
+  
+      if (isCorrect) correctCount++;
+  
+      await submitAnswer(q.id, userSelected, isCorrect, examSessionId);
     }
+  
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+    await saveExamResult(examSessionId, correctCount, questions.length, totalTime);
+  
+    setScore(correctCount);
+    setEndTime(Date.now());
+    setShowResults(true);
   };
+  
 
   const submitAnswer = async (questionId, userAnswer, isCorrect, sessionId) => {
     const { error } = await supabase.from("respuestas_examen").insert([
@@ -177,7 +186,8 @@ function App() {
   }
 
   const startIndex = currentPage * questionsPerPage;
-  const currentQ = questions[startIndex + currentQuestion];
+  const currentQuestions = questions.slice(startIndex, startIndex + questionsPerPage);
+
 
   return (
     <div className="container">
@@ -185,40 +195,58 @@ function App() {
         <strong>Tiempo transcurrido: {formatTime(elapsedTime)}</strong>
       </div>
       <h1>Salesforce Admin Quiz</h1>
-      <h3>Página {currentPage + 1} de {Math.ceil(questions.length / questionsPerPage)}</h3>
-      <h2>{currentQ?.pregunta || currentQ?.question}</h2>
-      <ul>
-        {currentQ?.options.map((option, index) => {
-          const isMultipleChoice = currentQ?.correct_answers.length > 1;
+      <h3>Preguntas {startIndex + 1} - {Math.min(startIndex + questionsPerPage, questions.length)} de {questions.length}</h3>
 
-          return (
-            <li key={index}>
-              <label>
-                <input
-                  type={isMultipleChoice ? "checkbox" : "radio"}
-                  name={`question-${currentQuestion}`}
-                  checked={selectedOptions.includes(index)}
-                  onChange={() => handleOptionSelect(index, isMultipleChoice)}
-                />
-                {option}
-              </label>
-            </li>
-          );
-        })}
+      {currentQuestions.map((question, qIndex) => {
+  const questionId = startIndex + qIndex;
+  const isMultipleChoice = question.correct_answers.length > 1;
+  const selected = selectedOptions[questionId] || [];
+
+  return (
+    <div key={question.id}>
+      <h3>{question.pregunta || question.question}</h3>
+      <ul>
+        {question.options.map((option, index) => (
+          <li key={index}>
+            <label>
+              <input
+                type={isMultipleChoice ? "checkbox" : "radio"}
+                name={`question-${questionId}`}
+                checked={selected.includes(index)}
+                onChange={() => handleOptionSelect(questionId, index, isMultipleChoice)}
+              />
+              {option}
+            </label>
+          </li>
+        ))}
       </ul>
-      <div>
-        <button onClick={goToPreviousPage} disabled={currentPage === 0}>
-          Anterior
-        </button>
-        <button onClick={goToNextPage} disabled={(currentPage + 1) * questionsPerPage >= questions.length}>
-          Siguiente
-        </button>
-      </div>
-      {(currentPage + 1) * questionsPerPage >= questions.length && (
-        <button onClick={handleSubmitExam}>Enviar examen</button>
-      )}
+    </div>
+      );
+      })}
+
+<div style={{ marginTop: "20px" }}>
+  <button onClick={goToPreviousPage} disabled={currentPage === 0}>
+    Anterior
+  </button>
+
+  {((currentPage + 1) * questionsPerPage) >= questions.length ? (
+    <button onClick={handleSubmitExam}>
+      Enviar examen
+    </button>
+  ) : (
+    <button onClick={goToNextPage}>
+      Siguiente
+    </button>
+  )}
+</div>
+
+
+      
+
+
     </div>
   );
+  
 }
 
 export default App;
